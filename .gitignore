@@ -94,3 +94,6 @@ ipython_config.py
 *.pth.tar
 *.ckpt
 *.log
+
+wandb/
+nohup.out
