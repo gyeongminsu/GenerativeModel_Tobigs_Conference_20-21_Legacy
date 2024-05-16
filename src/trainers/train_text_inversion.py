@@ -18,9 +18,7 @@ class BaseTrainer():
                  train_loader,
                  logger,
                  sd_model,
-                 placeholder_token,
-                 init_token,
-                 num_vectors):
+                 ):
         super().__init__()
         
         self.vae = sd_model[0]
@@ -36,22 +34,6 @@ class BaseTrainer():
             self.tokenizer1 = sd_model[3]
             self.text_encoder1 = sd_model[4]
             
-        self.tokenizer1, init_token_id, placeholder_ids = add_placeholder_to_tokenizer(self.tokenizer1,placeholder_token,init_token,num_vectors)
-        
-        self.text_encoder1.resize_token_embeddings(len(self.tokenizer1))
-        
-        token_embeds = self.text_encoder1.get_input_embeddings().weight.data
-        with torch.no_grad():
-            for token_id in placeholder_ids:
-                token_embeds[token_id] = token_embeds[init_token_id].clone()
-                
-        self.vae.requires_grad_(False)
-        self.unet.requires_grad_(False)
-        self.text_encoder_2.requires_grad_(False)
-        
-        self.text_encoder_1.text_model.encoder.requires_grad_(False)
-        self.text_encoder_1.text_model.final_layer_norm.requires_grad_(False)
-        self.text_encoder_1.text_model.embeddings.position_embedding.requires_grad_(False)
         
         self.optimizer = self._build_optimizer(cfg.optimizer_type,cfg.optimizer)
         

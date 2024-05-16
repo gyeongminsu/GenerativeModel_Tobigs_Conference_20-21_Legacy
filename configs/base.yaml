@@ -1,0 +1,13 @@
+project_name : 'Tobigs_Conference'
+entity: 'rladyd020'
+group_name: 'train'
+exp_name: 'train1'
+device: 'cuda:0'
+seed: 0
+
+pretrained_model_name_or_path: "stabilityai/stable-diffusion-xl-base-1.0"
+revision: null
+dtype: 'fp16'
+
+defaults:
+- _self_

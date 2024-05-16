@@ -1,0 +1,3 @@
+defaults:
+- diffusion: sdxl_ldm
+- tokenizer: sdxl_tokenizer

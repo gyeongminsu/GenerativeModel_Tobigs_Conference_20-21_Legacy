@@ -1,0 +1,4 @@
+defaults:
+- base
+- model: sdxl
+- _self_

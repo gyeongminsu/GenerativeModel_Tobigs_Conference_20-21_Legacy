@@ -1,0 +1,5 @@
+pretrained_model_name_or_path: ${pretrained_model_name_or_path}
+pretrained_vae_name_or_path: null
+scheduler_type: 'euler_discrete'
+revision: ${revision}
+dtype: ${dtype}
