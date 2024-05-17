@@ -96,4 +96,6 @@ ipython_config.py
 *.log
 
 wandb/
+data/
+model_dumps/
 nohup.out

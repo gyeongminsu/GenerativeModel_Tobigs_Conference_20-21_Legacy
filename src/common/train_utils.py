@@ -11,7 +11,22 @@ def set_global_seeds(seed):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
+
+def init_token_embeddings(tokenizer, text_encoder, init_token_id, placeholder_token_ids):
+    text_encoder.resize_token_embeddings(len(tokenizer))
     
+    token_embeds = text_encoder.get_input_embeddings().weight.data
+    
+    # init token 바꾸면 여기도 바꾸기 zip 함수 쓰면 될듯
+    with torch.no_grad():
+        for idx, token_id in enumerate(placeholder_token_ids):
+            if idx == 0:
+                token_embeds[token_id] = token_embeds[init_token_id].clone()
+            else:
+                token_embeds[token_id] = torch.randn_like(token_embeds[0]) * 0.018
+            
+    return tokenizer, text_encoder
+
 def add_placeholder_to_tokenizer(tokenizer,placeholder_token,init_token,num_vectors):
     placeholder_tokens = [placeholder_token]
     

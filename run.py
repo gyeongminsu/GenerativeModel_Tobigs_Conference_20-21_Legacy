@@ -5,11 +5,16 @@ import wandb
 import hydra
 import omegaconf
 from hydra import compose, initialize
+import PIL
 
-from src.common.train_utils import set_global_seeds
+from src.common.train_utils import set_global_seeds, add_placeholder_to_tokenizer, init_token_embeddings
 from src.models import build_stable_diffusion
+from src.trainers import build_trainer
+from src.datasets import build_dataloader
+from src.common.logger import WandbTrainerLogger
 
 def run(args):
+
     args = DotMap(args)
     
     config_path = args.config_path
@@ -24,26 +29,65 @@ def run(args):
 
     set_global_seeds(cfg.seed)
     device = torch.device(cfg.device)
-    
+
+
     sd = build_stable_diffusion(cfg.model)
     
     
-    '''
-    logger = WandbTrainerLogger(cfg)
-    train_loader = build_dataloader(cfg.dataset)
+    cfg.trainer.placeholder.init_token = args.init_token
+    # TODO: Init token 두번째 토큰부터 random init할 수 있게 만들기
+    sd[3][0], init_token_id, placeholder_ids = add_placeholder_to_tokenizer(sd[3][0],**cfg.trainer.placeholder)
+    sd[3][0], sd[4][0] = init_token_embeddings(sd[3][0],sd[4][0],init_token_id, placeholder_ids)
+    placeholder_token = " ".join(sd[3][0].convert_ids_to_tokens(placeholder_ids))
     
-    trainer = build_trainer(cfg=cfg.trainer,device=device,train_loader=train_loader,logger=logger,diffusion=diffusion,unet=unet)
+    train_loader = build_dataloader(cfg.dataset,sd[3][0],sd[3][1],placeholder_token=placeholder_token)
 
-    trainer.train()
     
+    logger = WandbTrainerLogger(cfg)
+    
+    trainer = build_trainer(cfg=cfg.trainer,device=device,logger=logger,sd=sd,train_loader=train_loader, placeholder_ids = placeholder_ids)
+
+ 
+    pipeline = trainer.train()
+
     wandb.finish()
-    torch.save(unet.state_dict(), f"./data/weights/{args.exp_name}.pth")
-    '''
-    
+    #torch.save(unet.state_dict(), f"./data/weights/{args.exp_name}.pth")
+
+    # Debug
+
+    from diffusers import DiffusionPipeline
+
+    refiner = DiffusionPipeline.from_pretrained(
+    "stabilityai/stable-diffusion-xl-refiner-1.0",
+    text_encoder_2=pipeline.text_encoder_2,
+    vae=pipeline.vae,
+    torch_dtype=torch.float16,
+    use_safetensors=True,
+    variant="fp16",
+    ).to("cuda")    
+    prompt = f"{placeholder_token} headshot photo style, christmas background"
+    for i in range(10):
+        
+        #prompt = f"Cat headshot photo style, christmas background"
+        image = pipeline(
+            prompt=prompt,
+            num_inference_steps=40,
+            denoising_end=0.8,
+            output_type="latent",
+        ).images
+        image = refiner(
+            prompt="Dog headshot photo style, christmas background",
+            num_inference_steps=40,
+            denoising_start=0.8,
+            image=image,
+        ).images[0]
+        image.save(f'/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/vis/exp{i}.png','png')
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_path', type=str, default='./configs')
     parser.add_argument('--config_name', type=str, default='TextualInversion')
+    parser.add_argument('--init_token', type=str, default='Dog')
     parser.add_argument('--overrides', action='append', default=[])
     args = parser.parse_args()
     

@@ -9,5 +9,7 @@ pretrained_model_name_or_path: "stabilityai/stable-diffusion-xl-base-1.0"
 revision: null
 dtype: 'fp16'
 
+resolution: 512
+
 defaults:
 - _self_

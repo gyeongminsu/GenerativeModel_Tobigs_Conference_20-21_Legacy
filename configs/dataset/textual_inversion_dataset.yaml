@@ -1,0 +1,19 @@
+train_dataset:
+  data_root: './data'
+  learnable_property: "object"  # [object, style]
+  size: ${resolution}
+  repeats: 10
+  interpolation: "bicubic"
+  flip_p: 0.5
+  set: "train"
+  center_crop: False
+
+train_dataloader:
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+
+test_dataloader:
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true

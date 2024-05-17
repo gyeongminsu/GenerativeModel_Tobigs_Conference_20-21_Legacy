@@ -1,4 +1,6 @@
 defaults:
 - base
 - model: sdxl
+- trainer: textual_inversion_trainer
+- dataset: textual_inversion_dataset
 - _self_

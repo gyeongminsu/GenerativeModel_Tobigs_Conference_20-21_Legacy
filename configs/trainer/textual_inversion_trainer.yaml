@@ -1,0 +1,29 @@
+loss: 'l2'
+seed: ${seed}
+
+epochs: 100
+
+resolution: ${resolution}
+
+log_every: 1
+
+placeholder:
+  placeholder_token: "<s1>"
+  init_token: null
+  num_vectors: ${eval:'2'}
+
+optimizer_type: 'adamw'
+dtype: ${dtype}
+
+optimizer:
+  lr: 0.0005
+  weight_decay: 0.00001
+  betas: [0.9, 0.999]
+
+scheduler:
+  T_0: null
+  T_mult: 1
+  eta_max: ${trainer.optimizer.lr}
+  T_up: 1
+  gamma: 1.
+  last_epoch: -1
