@@ -54,32 +54,34 @@ def run(args):
     #torch.save(unet.state_dict(), f"./data/weights/{args.exp_name}.pth")
 
     # Debug
-
-    from diffusers import DiffusionPipeline
-
-    refiner = DiffusionPipeline.from_pretrained(
-    "stabilityai/stable-diffusion-xl-refiner-1.0",
-    text_encoder_2=pipeline.text_encoder_2,
-    vae=pipeline.vae,
-    torch_dtype=torch.float16,
-    use_safetensors=True,
-    variant="fp16",
-    ).to("cuda")    
     prompt = f"{placeholder_token} headshot photo style, christmas background"
+    from diffusers import DiffusionPipeline
+    images = []
     for i in range(10):
-        
-        #prompt = f"Cat headshot photo style, christmas background"
         image = pipeline(
             prompt=prompt,
             num_inference_steps=40,
             denoising_end=0.8,
             output_type="latent",
         ).images
+        images.append(image)
+        
+    pipeline.to('cpu')
+    torch.cuda.empty_cache()
+    
+    refiner = DiffusionPipeline.from_pretrained(
+    "stabilityai/stable-diffusion-xl-refiner-1.0",
+    text_encoder_2=pipeline.text_encoder_2,
+    vae=pipeline.vae,
+    use_safetensors=True,
+    ).to(device)
+
+    for i in range(10):
         image = refiner(
-            prompt="Dog headshot photo style, christmas background",
+            prompt=f"{args.init_token} headshot photo style, christmas background",
             num_inference_steps=40,
             denoising_start=0.8,
-            image=image,
+            image=images[i],
         ).images[0]
         image.save(f'/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/vis/exp{i}.png','png')
 

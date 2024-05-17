@@ -29,6 +29,7 @@ class TextualInversionTrainer():
         self.placeholder_ids = placeholder_ids
         
         self.vae = sd_model[0].to(self.device)
+        
         self.unet = sd_model[1].to(self.device)
         self.noise_scheduler = sd_model[2]
         self.train_loader = train_loader
@@ -112,10 +113,12 @@ class TextualInversionTrainer():
                 encoder_hidden_states_1 = (
                     self.text_encoder1(batch['input_ids_1'].to(self.device), output_hidden_states=True).hidden_states[-2].to(dtype=self.dtype)
                 )
+
                 encoder_output_2 = self.text_encoder2(
                 batch["input_ids_2"].reshape(batch["input_ids_1"].shape[0], -1).to(self.device), output_hidden_states=True
                 )
                 encoder_hidden_states_2 = encoder_output_2.hidden_states[-2].to(dtype=self.dtype)
+
                 original_size = [
                     (batch["original_size"][0][i].item(), batch["original_size"][1][i].item())
                     for i in range(batch_size)
@@ -152,10 +155,10 @@ class TextualInversionTrainer():
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
                 train_logs['loss'] = loss.item()
                 train_logs['lr'] = self.scheduler.get_lr()[0]
-                #self.logger.update_log(**train_logs)
+                self.logger.update_log(**train_logs)
                 
                 if self.step % cfg.log_every == 0:
-                   self.logger.log_to_wandb(self.step)
+                    self.logger.log_to_wandb(self.step)
                 
                 loss.backward()
                 self.optimizer.step()
@@ -172,7 +175,6 @@ class TextualInversionTrainer():
                     ] = original_embeds_params[index_no_updates]
                 
                 self.step += 1
-
             self.epoch += 1
 
         # after training, make PipeLine
@@ -184,7 +186,8 @@ class TextualInversionTrainer():
                 unet = self.unet,
                 tokenizer = self.tokenizer1,
                 tokenizer_2 = self.tokenizer2,
-                torch_dtype=torch.float16, variant="fp16", use_safetensors=True
-                ).to("cuda")
+                torch_dtype = torch.float32,
+                use_safetensors=True
+                ).to(self.device)
         
         return pipeline
