@@ -2,18 +2,16 @@ import math
 from torch.optim.lr_scheduler import _LRScheduler
 
 class CosineAnnealingWarmUpRestarts(_LRScheduler):
-    def __init__(self, optimizer, T_0, T_mult=1, eta_max=0.1, T_up=0, gamma=1., last_epoch=-1):
+    def __init__(self, optimizer, T_0, T_mult=1, eta_max=0.1, T_up_ratio=0, gamma=1., last_epoch=-1):
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
             raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
-        if T_up < 0 or not isinstance(T_up, int):
-            raise ValueError("Expected positive integer T_up, but got {}".format(T_up))
         self.T_0 = T_0
         self.T_mult = T_mult
         self.base_eta_max = eta_max
         self.eta_max = eta_max
-        self.T_up = T_up
+        self.T_up = int(T_up_ratio * self.T_0) # make T_up to ratio
         self.T_i = T_0
         self.gamma = gamma
         self.cycle = 0

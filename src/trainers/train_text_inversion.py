@@ -9,6 +9,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 from diffusers import DiffusionPipeline
+import safetensors
 
 from src.common.schedulers import CosineAnnealingWarmUpRestarts
 from src.common.train_utils import *
@@ -79,6 +80,33 @@ class TextualInversionTrainer():
         self.text_encoder1.text_model.final_layer_norm.requires_grad_(False)
         self.text_encoder1.text_model.embeddings.position_embedding.requires_grad_(False)
         
+    def get_sigmas(self,timesteps, n_dim=4, dtype=torch.float32):
+        sigmas = self.noise_scheduler.sigmas.to(device=self.device, dtype=dtype)
+        schedule_timesteps = self.noise_scheduler.timesteps.to(self.device)
+        timesteps = timesteps.to(self.device)
+
+        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+
+        sigma = sigmas[step_indices].flatten()
+        while len(sigma.shape) < n_dim:
+            sigma = sigma.unsqueeze(-1)
+        return sigma
+    
+    def save_progress(self,tokenizer,text_encoder, placeholder_token_ids, save_path, safe_serialization=True):
+        print("Saving embeddings")
+        learned_embeds = (
+            text_encoder
+            .get_input_embeddings()
+            .weight[min(placeholder_token_ids) : max(placeholder_token_ids) + 1]
+        )
+        learned_embeds_dict = {f'{tokenizer.convert_ids_to_tokens(min(placeholder_token_ids))}': learned_embeds.detach().cpu()}
+
+        if safe_serialization:
+            safetensors.torch.save_file(learned_embeds_dict, save_path, metadata={"format": "pt"})
+        else:
+            torch.save(learned_embeds_dict, save_path)
+
+        
     def train(self):
         cfg = self.cfg
         num_epochs = cfg.epochs
@@ -105,9 +133,14 @@ class TextualInversionTrainer():
                 noise = torch.randn_like(latents)
                 batch_size = latents.shape[0]
                 # Sample a random timestep for each image
-                timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps,(batch_size,),device=latents.device)
-                timesteps = timesteps.long()
+                indices = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (batch_size,))
+                timesteps = self.noise_scheduler.timesteps[indices].to(device=self.device)
+
                 noisy_latents = self.noise_scheduler.add_noise(latents,noise,timesteps)
+                
+                sigmas = self.get_sigmas(timesteps, len(noisy_latents.shape), noisy_latents.dtype)
+                
+                inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
                 
                 # text embedding
                 encoder_hidden_states_1 = (
@@ -141,14 +174,21 @@ class TextualInversionTrainer():
                 # Predict the noise residual
 
                 model_pred = self.unet(
-                    noisy_latents, timesteps, encoder_hidden_states, added_cond_kwargs=added_cond_kwargs
+                    inp_noisy_latents, timesteps, encoder_hidden_states, added_cond_kwargs=added_cond_kwargs
                 ).sample
 
+                
                 # Get the target for loss depending on the prediction type
                 if self.noise_scheduler.config.prediction_type == "epsilon":
-                    target = noise
+                    model_pred = model_pred * (-sigmas) + noisy_latents
+                    target = latents 
+                    #target = noise
                 elif self.noise_scheduler.config.prediction_type == "v_prediction":
-                    target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
+                    model_pred = model_pred * (-sigmas / (sigmas**2 + 1) ** 0.5) + (
+                                noisy_latents / (sigmas**2 + 1)
+                            )
+                    target = latents
+                    #target = self.noise_scheduler.get_velocity(latents, noise, timesteps)
                 else:
                     raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
@@ -176,6 +216,8 @@ class TextualInversionTrainer():
                 
                 self.step += 1
             self.epoch += 1
+        save_path = '/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/model/exp1.pt'
+        self.save_progress(self.tokenizer1,self.text_encoder1,self.placeholder_ids,save_path,True)
 
         # after training, make PipeLine
         pipeline = DiffusionPipeline.from_pretrained(

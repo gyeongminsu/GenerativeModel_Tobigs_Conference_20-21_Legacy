@@ -53,7 +53,7 @@ def run(args):
     wandb.finish()
     #torch.save(unet.state_dict(), f"./data/weights/{args.exp_name}.pth")
 
-    # Debug
+    # Debug <s1>
     prompt = f"{placeholder_token} headshot photo style, christmas background"
     from diffusers import DiffusionPipeline
     images = []
@@ -78,7 +78,7 @@ def run(args):
 
     for i in range(10):
         image = refiner(
-            prompt=f"{args.init_token} headshot photo style, christmas background",
+            prompt=f"{placeholder_token} headshot photo style, christmas background",
             num_inference_steps=40,
             denoising_start=0.8,
             image=images[i],

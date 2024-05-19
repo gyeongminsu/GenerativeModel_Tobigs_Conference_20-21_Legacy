@@ -5,25 +5,25 @@ epochs: 100
 
 resolution: ${resolution}
 
-log_every: 1
+log_every: 100
 
 placeholder:
   placeholder_token: "<s1>"
   init_token: null
-  num_vectors: ${eval:'2'}
+  num_vectors: ${eval:'3'}
 
 optimizer_type: 'adamw'
 dtype: ${dtype}
 
 optimizer:
-  lr: 0.0005
+  lr: 0
   weight_decay: 0.00001
   betas: [0.9, 0.999]
 
 scheduler:
   T_0: null
   T_mult: 1
-  eta_max: ${trainer.optimizer.lr}
-  T_up: 1
+  eta_max: 0.0005
+  T_up_ratio: 0.2
   gamma: 1.
   last_epoch: -1
