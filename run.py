@@ -6,6 +6,7 @@ import hydra
 import omegaconf
 from hydra import compose, initialize
 import PIL
+import os
 
 from src.common.train_utils import set_global_seeds, add_placeholder_to_tokenizer, init_token_embeddings
 from src.models import build_stable_diffusion
@@ -76,6 +77,9 @@ def run(args):
     use_safetensors=True,
     ).to(device)
 
+
+    img_path = '/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/vis/'
+    os.mkdir(img_path+cfg.exp_name,exist_ok=True)
     for i in range(10):
         image = refiner(
             prompt=f"{placeholder_token} headshot photo style, christmas background",
@@ -83,7 +87,7 @@ def run(args):
             denoising_start=0.8,
             image=images[i],
         ).images[0]
-        image.save(f'/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/vis/exp{i}.png','png')
+        image.save(f'{img_path}/{cfg.exp_name}/exp{i}.png','png')
 
     
 
