@@ -5,12 +5,12 @@ epochs: 100
 
 resolution: ${resolution}
 
-log_every: 100
+log_every: 10
 
 placeholder:
   placeholder_token: "<s1>"
   init_token: null
-  num_vectors: ${eval:'3'}
+  num_vectors: 3
 
 optimizer_type: 'adamw'
 dtype: ${dtype}

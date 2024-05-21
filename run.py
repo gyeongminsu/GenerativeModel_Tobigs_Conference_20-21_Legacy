@@ -26,7 +26,7 @@ def run(args):
     def eval_resolver(s: str):
         return eval(s)
     omegaconf.OmegaConf.register_new_resolver("eval", eval_resolver)
-
+    
     set_global_seeds(cfg.seed)
     device = torch.device(cfg.device)
 
@@ -84,6 +84,8 @@ def run(args):
             image=images[i],
         ).images[0]
         image.save(f'/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/vis/exp{i}.png','png')
+
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

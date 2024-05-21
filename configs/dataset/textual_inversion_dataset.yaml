@@ -1,5 +1,5 @@
 train_dataset:
-  data_root: './data'
+  data_root: './data/dog1'
   learnable_property: "object"  # [object, style]
   size: ${resolution}
   repeats: 100

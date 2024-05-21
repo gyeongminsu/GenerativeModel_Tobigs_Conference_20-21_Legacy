@@ -29,6 +29,7 @@ def init_token_embeddings(tokenizer, text_encoder, init_token_id, placeholder_to
 
 def add_placeholder_to_tokenizer(tokenizer,placeholder_token,init_token,num_vectors):
     placeholder_tokens = [placeholder_token]
+    num_vectors = int(num_vectors)
     
     if num_vectors < 1:
         raise ValueError(f"--num_vectors has to be larger or equal to 1, but is {num_vectors}")
