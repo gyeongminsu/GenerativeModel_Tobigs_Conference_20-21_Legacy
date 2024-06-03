@@ -1,4 +1,5 @@
 from torch.utils.data import Dataset
+from PIL.ImageOps import exif_transpose
 import os
 import PIL
 from PIL import Image
@@ -34,7 +35,7 @@ class DreamBoothDataset(Dataset):
 
         self.instance_data_root = instance_data_root
 
-        instance_images = [Image.open(path) for path in list(Path(instance_data_root).iterdir())]
+        instance_images = [Image.open(path) for path in list(Path(instance_data_root).iterdir())] # 여기를 text inversion이랑 같게 바꿔야함
         self.custom_instance_prompts = None
 
         self.instance_images = []
@@ -121,6 +122,7 @@ class DreamBoothDataset(Dataset):
         else:  # costum prompts were provided, but length does not match size of image dataset
             example["instance_prompt"] = self.instance_prompt
 
+        ### for prior preservation
         if self.class_data_root:
             class_image = Image.open(self.class_images_path[index % self.num_class_images])
             class_image = exif_transpose(class_image)

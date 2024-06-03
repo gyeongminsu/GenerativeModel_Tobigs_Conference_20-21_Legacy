@@ -153,18 +153,4 @@ DEFAULT_TARGET_REPLACE = UNET_DEFAULT_TARGET_REPLACE
 
 EMBED_FLAG = "<embed>"
 
-def _find_children(
-    model,
-    search_class: List[Type[nn.Module]] = [nn.Linear],
-):
-    """
-    Find all modules of a certain class (or union of classes).
 
-    Returns all matching modules, along with the parent of those moduless and the
-    names they are referenced by.
-    """
-    # For each target find every linear_class module that isn't a child of a LoraInjectedLinear
-    for parent in model.modules():
-        for name, module in parent.named_children():
-            if any([isinstance(module, _class) for _class in search_class]):
-                yield parent, name, module
