@@ -325,3 +325,57 @@ def inject_trainable_lora_extended(
         names.append(name)
 
     return require_grad_params, names
+
+def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
+
+    loras = []
+
+    for _m, _n, _child_module in _find_modules(
+        model,
+        target_replace_module,
+        search_class=[LoraInjectedLinear, LoraInjectedConv2d],
+    ):
+        loras.append((_child_module.lora_up, _child_module.lora_down))
+
+    if len(loras) == 0:
+        raise ValueError("No lora injected.")
+
+    return loras
+
+def extract_lora_as_tensor(
+    model, target_replace_module=DEFAULT_TARGET_REPLACE, as_fp16=True
+):
+
+    loras = []
+
+    for _m, _n, _child_module in _find_modules(
+        model,
+        target_replace_module,
+        search_class=[LoraInjectedLinear, LoraInjectedConv2d],
+    ):
+        up, down = _child_module.realize_as_lora()
+        if as_fp16:
+            up = up.to(torch.float16)
+            down = down.to(torch.float16)
+
+        loras.append((up, down))
+
+    if len(loras) == 0:
+        raise ValueError("No lora injected.")
+
+    return loras
+
+
+def save_lora_weight(
+    model,
+    path="./lora.pt",
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+):
+    weights = []
+    for _up, _down in extract_lora_ups_down(
+        model, target_replace_module=target_replace_module
+    ):
+        weights.append(_up.weight.to("cpu").to(torch.float16))
+        weights.append(_down.weight.to("cpu").to(torch.float16))
+
+    torch.save(weights, path)
