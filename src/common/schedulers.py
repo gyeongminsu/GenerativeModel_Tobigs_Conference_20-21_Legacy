@@ -53,3 +53,56 @@ class CosineAnnealingWarmUpRestarts(_LRScheduler):
         self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
+
+class CosineAnnealingWarmUpRestartsPTI(_LRScheduler):
+    def __init__(self, optimizer, T_0, T_mult=1, eta_max_unet=0.1,eta_max_text_encoder1=0.1,eta_max_text_encoder2=0.1, T_up_ratio=0, gamma=1., last_epoch=-1):
+        if T_0 <= 0 or not isinstance(T_0, int):
+            raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
+        if T_mult < 1 or not isinstance(T_mult, int):
+            raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
+        self.T_0 = T_0
+        self.T_mult = T_mult
+        self.base_eta_max = [eta_max_unet,eta_max_text_encoder1,eta_max_text_encoder2]
+        self.eta_max = [eta_max_unet,eta_max_text_encoder1,eta_max_text_encoder2]
+        self.T_up = int(T_up_ratio * self.T_0) # make T_up to ratio
+        self.T_i = T_0
+        self.gamma = gamma
+        self.cycle = 0
+        self.T_cur = last_epoch
+        super(CosineAnnealingWarmUpRestartsPTI, self).__init__(optimizer, last_epoch)
+    
+    def get_lr(self):
+        if self.T_cur == -1:
+            return self.base_lrs
+        elif self.T_cur < self.T_up:
+            return [(eta_max - base_lr)*self.T_cur / self.T_up + base_lr for base_lr, eta_max in zip(self.base_lrs, self.eta_max)]
+        else:
+            return [base_lr + (eta_max - base_lr) * (1 + math.cos(math.pi * (self.T_cur-self.T_up) / (self.T_i - self.T_up))) / 2
+                    for base_lr, eta_max in zip(self.base_lrs, self.eta_max)]
+
+    def step(self, epoch=None):
+        if epoch is None:
+            epoch = self.last_epoch + 1
+            self.T_cur = self.T_cur + 1
+            if self.T_cur >= self.T_i:
+                self.cycle += 1
+                self.T_cur = self.T_cur - self.T_i
+                self.T_i = (self.T_i - self.T_up) * self.T_mult + self.T_up
+        else:
+            if epoch >= self.T_0:
+                if self.T_mult == 1:
+                    self.T_cur = epoch % self.T_0
+                    self.cycle = epoch // self.T_0
+                else:
+                    n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
+                    self.cycle = n
+                    self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
+                    self.T_i = self.T_0 * self.T_mult ** (n)
+            else:
+                self.T_i = self.T_0
+                self.T_cur = epoch
+                
+        self.eta_max = [base_eta_max * (self.gamma ** self.cycle) for base_eta_max in self.base_eta_max]
+        self.last_epoch = math.floor(epoch)
+        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            param_group['lr'] = lr

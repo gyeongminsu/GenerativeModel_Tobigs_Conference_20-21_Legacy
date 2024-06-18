@@ -1,4 +1,4 @@
-type: "TextualInversion"
+type: "DreamBooth"
 
 train_dataset:
   data_root: './data/dog1'
@@ -11,11 +11,11 @@ train_dataset:
   center_crop: False
 
 train_dataloader:
-  batch_size: 1
+  batch_size: 2
   num_workers: 4
   pin_memory: true
 
 test_dataloader:
-  batch_size: 1
+  batch_size: 4
   num_workers: 4
   pin_memory: true

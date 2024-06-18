@@ -8,49 +8,51 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+import itertools
 from diffusers import DiffusionPipeline
 import safetensors
 
-from src.common.schedulers import CosineAnnealingWarmUpRestarts
+from src.models.adapter import *
+from src.common.schedulers import CosineAnnealingWarmUpRestartsPTI
 from src.common.train_utils import *
 
-class TextualInversionTrainer():
+class PerformTuningTrainer():
     def __init__(self,
                  cfg,
                  device,
                  train_loader,
                  logger,
                  sd_model,
-                 placeholder_ids
+                 placeholder_ids,
                  ):
         super().__init__()
         
         self.device = device
         self.cfg = cfg
         self.placeholder_ids = placeholder_ids
-        
         self.vae = sd_model[0].to(self.device)
         
-        self.unet = sd_model[1].to(self.device)
-        self.noise_scheduler = sd_model[2]
+        self.vae = sd_model.vae.to(self.device)
+        self.unet = sd_model.unet.to(self.device)
+        self.noise_scheduler = sd_model.scheduler
+
         self.train_loader = train_loader
         
         if len(sd_model[3]) == 2:
-            self.tokenizer1 = sd_model[3][0]
-            self.tokenizer2 = sd_model[3][1]
-            self.text_encoder1 = sd_model[4][0].to(self.device)
-            self.text_encoder2 = sd_model[4][1].to(self.device)
+            self.tokenizer1 = sd_model.tokenizer
+            self.tokenizer2 = sd_model.tokenizer_2
+            self.text_encoder1 = sd_model.text_encoder.to(self.device)
+            self.text_encoder2 = sd_model.text_encoder_2.to(self.device)
         else:
-            self.tokenizer1 = sd_model[3]
-            self.text_encoder1 = sd_model[4].to(self.device)
-            
+            self.tokenizer1 = sd_model.tokenizer
+            self.text_encoder1 = sd_model.text_encoder.to(self.device)
         self.logger = logger
         
-        self._freeze_wo_embeddings()
+        self.inject_lora(cfg.lora)
         self.optimizer = self._build_optimizer(cfg.optimizer_type,cfg.optimizer)
         cfg.scheduler.T_0 = len(train_loader)
         self.scheduler = self._build_scheduler(self.optimizer,cfg.scheduler)
-        
+
         self.dtype = torch.float16
         if cfg.dtype == 'fp32':
             self.dtype = torch.float32
@@ -60,25 +62,61 @@ class TextualInversionTrainer():
         
     def _build_optimizer(self, optimizer_type, optimizer_cfg):
         if optimizer_type == 'adamw':
-            return optim.AdamW(self.text_encoder1.get_input_embeddings().parameters(), **optimizer_cfg)
+            return optim.AdamW(self.params_to_optimize, **optimizer_cfg)
         elif optimizer_type == 'adam':
-            return optim.Adam(self.text_encoder1.get_input_embeddings().parameters(), **optimizer_cfg)
+            return optim.Adam(self.params_to_optimize, **optimizer_cfg)
         elif optimizer_type == 'sgd':
-            return optim.SGD(self.text_encoder1.get_input_embeddings().parameters(), **optimizer_cfg)
+            return optim.SGD(self.params_to_optimize, **optimizer_cfg)
         else:
             raise NotImplementedError
         
     def _build_scheduler(self, optimizer, scheduler_cfg):
-        return CosineAnnealingWarmUpRestarts(optimizer=optimizer, **scheduler_cfg)
+        return CosineAnnealingWarmUpRestartsPTI(optimizer=optimizer, **scheduler_cfg)
     
-    def _freeze_wo_embeddings(self):
-        self.vae.requires_grad_(False)
-        self.unet.requires_grad_(False)
+    def inject_lora(self,lora_cfg):
+        lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"}
+        lora_clip_target_modules={"CLIPAttention"}
+        
+        lora_unet_target_modules = ( lora_unet_target_modules | UNET_EXTENDED_TARGET_REPLACE )
+        
+        unet_lora_params, _ = inject_trainable_lora_extended(
+            self.unet, r=lora_cfg.lora_rank, target_replace_module=lora_unet_target_modules
+        )
+
+        inspect_lora(self.unet)
+        params_to_optimize = [
+        {"params": itertools.chain(*unet_lora_params), "lr": lora_cfg.unet_lr},
+        ]
+        
+        self.text_encoder1.requires_grad_(False)
         self.text_encoder2.requires_grad_(False)
-        # Freeze all parameters except for the token embeddings in text encoder
-        self.text_encoder1.text_model.encoder.requires_grad_(False)
-        self.text_encoder1.text_model.final_layer_norm.requires_grad_(False)
-        self.text_encoder1.text_model.embeddings.position_embedding.requires_grad_(False)
+        
+        text_encoder1_lora_params, _ = inject_trainable_lora(
+            self.text_encoder1,
+            target_replace_module=lora_clip_target_modules,
+            r=lora_cfg.lora_rank
+        )
+        
+        params_to_optimize += [
+            {
+                "params": itertools.chain(*text_encoder1_lora_params),
+                "lr": lora_cfg.text_encoder_lr,
+            }
+        ]
+        
+        text_encoder2_lora_params, _ = inject_trainable_lora(
+            self.text_encoder2,
+            target_replace_module=lora_clip_target_modules,
+            r=lora_cfg.lora_rank
+        )
+
+        params_to_optimize += [
+            {
+                "params": itertools.chain(*text_encoder2_lora_params),
+                "lr": lora_cfg.text_encoder_lr,
+            }
+        ]
+        self.params_to_optimize = params_to_optimize
         
     def get_sigmas(self,timesteps, n_dim=4, dtype=torch.float32):
         sigmas = self.noise_scheduler.sigmas.to(device=self.device, dtype=dtype)
@@ -91,21 +129,6 @@ class TextualInversionTrainer():
         while len(sigma.shape) < n_dim:
             sigma = sigma.unsqueeze(-1)
         return sigma
-    
-    def save_progress(self,tokenizer,text_encoder, placeholder_token_ids, save_path, safe_serialization=True):
-        print("Saving embeddings")
-        learned_embeds = (
-            text_encoder
-            .get_input_embeddings()
-            .weight[min(placeholder_token_ids) : max(placeholder_token_ids) + 1]
-        )
-        learned_embeds_dict = {f'{tokenizer.convert_ids_to_tokens(min(placeholder_token_ids))}': learned_embeds.detach().cpu()}
-
-        if safe_serialization:
-            safetensors.torch.save_file(learned_embeds_dict, save_path, metadata={"format": "pt"})
-        else:
-            torch.save(learned_embeds_dict, save_path)
-
         
     def train(self):
         cfg = self.cfg
@@ -113,10 +136,10 @@ class TextualInversionTrainer():
         loss_type = cfg.loss
         self.logger.log_to_wandb(self.step)
         
-        original_embeds_params = self.text_encoder1.get_input_embeddings().weight.data.clone()
-        
         for epoch in range(num_epochs):
+            self.unet.train()
             self.text_encoder1.train()
+            self.text_encoder2.train()
             print(f'Epoch: {epoch}')
             for step, batch in enumerate(tqdm.tqdm(self.train_loader)):
                 
@@ -193,8 +216,11 @@ class TextualInversionTrainer():
                     raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                train_logs['ti_loss'] = loss.item()
-                train_logs['ti_lr'] = self.scheduler.get_lr()[0]
+                train_logs['pt_loss'] = loss.item()
+                scheduler_lr = self.scheduler.get_lr()
+                train_logs['ti_lr_unet'] = scheduler_lr[0]
+                train_logs['ti_lr_text_encoder1'] = scheduler_lr[1]
+                train_logs['ti_lr_text_encoder2'] = scheduler_lr[2]
                 self.logger.update_log(**train_logs)
                 
                 if self.step % cfg.log_every == 0:
@@ -205,19 +231,8 @@ class TextualInversionTrainer():
                 self.scheduler.step()
                 self.optimizer.zero_grad()
                 
-                # update only new token
-                index_no_updates = torch.ones((len(self.tokenizer1),), dtype=torch.bool)
-                index_no_updates[min(self.placeholder_ids) : max(self.placeholder_ids) + 1] = False
-                
-                with torch.no_grad():
-                    self.text_encoder1.get_input_embeddings().weight[
-                        index_no_updates
-                    ] = original_embeds_params[index_no_updates]
-                
                 self.step += 1
             self.epoch += 1
-        save_path = '/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/model/exp1.pt'
-        self.save_progress(self.tokenizer1,self.text_encoder1,self.placeholder_ids,save_path,True)
 
         # after training, make PipeLine
         pipeline = DiffusionPipeline.from_pretrained(

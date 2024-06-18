@@ -231,5 +231,6 @@ class DreamBoothDataset(Dataset):
             class_image = (class_image / 127.5 - 1.0).astype(np.float32)
 
             example["class_pixel_values"] = torch.from_numpy(class_image).permute(2, 0, 1)
-
         return example
+    
+    

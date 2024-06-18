@@ -1,0 +1,6 @@
+defaults:
+- base
+- model: sdxl
+- trainer: pivotal_tuning_inversion_trainer
+- dataset: textual_inversion_dataset
+- _self_
