@@ -3,6 +3,7 @@ import tqdm
 import random
 import wandb
 import PIL
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -48,8 +49,8 @@ class TextualInversionTrainer():
         
         self._freeze_wo_embeddings()
         self.optimizer = self._build_optimizer(cfg.optimizer_type,cfg.optimizer)
-        cfg.scheduler.T_0 = len(train_loader)
-        self.scheduler = self._build_scheduler(self.optimizer,cfg.scheduler)
+        cfg.ti_scheduler.T_0 = len(train_loader)
+        self.scheduler = self._build_scheduler(self.optimizer,cfg.ti_scheduler)
         
         self.dtype = torch.float16
         if cfg.dtype == 'fp32':
@@ -193,8 +194,8 @@ class TextualInversionTrainer():
                     raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                train_logs['ti_loss'] = loss.item()
-                train_logs['ti_lr'] = self.scheduler.get_lr()[0]
+                train_logs['ti/loss'] = loss.item()
+                train_logs['ti/lr'] = self.scheduler.get_lr()[0]
                 self.logger.update_log(**train_logs)
                 
                 if self.step % cfg.log_every == 0:
@@ -215,10 +216,14 @@ class TextualInversionTrainer():
                     ] = original_embeds_params[index_no_updates]
                 
                 self.step += 1
+                
             self.epoch += 1
-        save_path = '/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/model/exp1.pt'
+            
+        '''
+        save_path = f'/home2/kkms4641/GenerativeModel_Tobigs_Conference_20-21/model_dumps/model/{cfg.save_path}/TI_embedding.pt'
         self.save_progress(self.tokenizer1,self.text_encoder1,self.placeholder_ids,save_path,True)
-
+        '''
+        
         # after training, make PipeLine
         pipeline = DiffusionPipeline.from_pretrained(
                 "stabilityai/stable-diffusion-xl-base-1.0",

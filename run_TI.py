@@ -78,8 +78,8 @@ def run(args):
     ).to(device)
 
 
-    img_path = '/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/vis/'
-    os.mkdir(img_path+cfg.exp_name,exist_ok=True)
+    img_path = '/home2/kkms4641/GenerativeModel_Tobigs_Conference_20-21/'
+    os.makedirs(img_path+cfg.exp_name,exist_ok=True)
     for i in range(10):
         image = refiner(
             prompt=f"{placeholder_token} headshot photo style, christmas background",

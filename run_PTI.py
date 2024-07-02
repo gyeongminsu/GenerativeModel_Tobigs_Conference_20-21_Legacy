@@ -28,6 +28,12 @@ def run(args):
     def eval_resolver(s: str):
         return eval(s)
     omegaconf.OmegaConf.register_new_resolver("eval", eval_resolver)
+
+    ### make exp folder ###
+
+    os.makedirs('./model_dumps/model/'+cfg.exp_name,exist_ok=True)
+
+    #######################
     
     set_global_seeds(cfg.seed)
     device = torch.device(cfg.device)
@@ -41,21 +47,23 @@ def run(args):
     sd[3][0], sd[4][0] = init_token_embeddings(sd[3][0],sd[4][0],init_token_id, placeholder_ids)
     placeholder_token = " ".join(sd[3][0].convert_ids_to_tokens(placeholder_ids))
     train_loader = build_dataloader(cfg.dataset,sd[3][0],sd[3][1],placeholder_token=placeholder_token)
-    logger = WandbTrainerLogger(cfg)
+    ti_logger = WandbTrainerLogger(cfg)
 
     cfg.trainer.train_type = 'TI'
-    trainer = build_trainer(cfg=cfg.trainer,device=device,logger=logger,sd=sd,train_loader=train_loader, placeholder_ids = placeholder_ids)
+    trainer = build_trainer(cfg=cfg.trainer,device=device,logger=ti_logger,sd=sd,train_loader=train_loader, placeholder_ids = placeholder_ids)
     pipeline = trainer.train()
     #torch.save(unet.state_dict(), f"./data/weights/{args.exp_name}.pth")
-    ##########################
+    wandb.finish()
+    ##########################    
 
+    pti_logger = WandbTrainerLogger(cfg)
     ### Perform Tuning ###
     cfg.trainer.train_type = 'PTI'
-    trainer = build_trainer(cfg=cfg.trainer,device=device,logger=logger,sd=pipeline,train_loader=train_loader, placeholder_ids = placeholder_ids)
+    trainer = build_trainer(cfg=cfg.trainer,device=device,logger=pti_logger,sd=pipeline,train_loader=train_loader, placeholder_ids = placeholder_ids)
     pipeline = trainer.train()
     wandb.finish()
     
-    '''
+    
     # Debug <s1>
     prompt = f"{placeholder_token} headshot photo style, christmas background"
     from diffusers import DiffusionPipeline
@@ -80,8 +88,8 @@ def run(args):
     ).to(device)
 
 
-    img_path = '/home/shu/Desktop/Yongjin/GenAI/Project/GenerativeModel_Tobigs_Conference_20-21/model_dumps/vis/'
-    os.mkdir(img_path+cfg.exp_name,exist_ok=True)
+    img_path = '/home2/kkms4641/GenerativeModel_Tobigs_Conference_20-21/model_dumps/vis/'
+    os.makedirs(img_path+cfg.exp_name,exist_ok=True)
     for i in range(10):
         image = refiner(
             prompt=f"{placeholder_token} headshot photo style, christmas background",
@@ -91,12 +99,11 @@ def run(args):
         ).images[0]
         image.save(f'{img_path}/{cfg.exp_name}/exp{i}.png','png')
 
-    '''
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_path', type=str, default='./configs')
-    parser.add_argument('--config_name', type=str, default='TextualInversion')
+    parser.add_argument('--config_name', type=str, default='PivotalTuningInversion')
     parser.add_argument('--init_token', type=str, default='Dog')
     parser.add_argument('--overrides', action='append', default=[])
     args = parser.parse_args()

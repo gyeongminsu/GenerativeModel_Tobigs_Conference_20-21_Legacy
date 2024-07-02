@@ -1,5 +1,6 @@
 from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
+import os
 import numpy as np
 import PIL
 import torch
@@ -255,7 +256,6 @@ def inspect_lora(model):
 
     return moved
 
-
 def save_lora_weight(
     model,
     path="./lora.pt",
@@ -265,23 +265,15 @@ def save_lora_weight(
     for _up, _down in extract_lora_ups_down(
         model, target_replace_module=target_replace_module
     ):
-        weights.append(_up.weight.to("cpu").to(torch.float16))
-        weights.append(_down.weight.to("cpu").to(torch.float16))
+        weights.append(_up.weight.to("cpu").to(torch.float32))
+        weights.append(_down.weight.to("cpu").to(torch.float32))
 
     torch.save(weights, path)
-
-def _text_lora_path(path: str) -> str:
-    assert path.endswith(".pt"), "Only .pt files are supported"
-    return ".".join(path.split(".")[:-1] + ["text_encoder", "pt"])
-
-
-def _ti_lora_path(path: str) -> str:
-    assert path.endswith(".pt"), "Only .pt files are supported"
-    return ".".join(path.split(".")[:-1] + ["ti", "pt"])
 
 def save_all(
     unet,
     text_encoder,
+    text_encoder2,
     save_path,
     placeholder_token_ids=None,
     placeholder_tokens=None,
@@ -289,12 +281,12 @@ def save_all(
     save_ti=True,
     target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
     target_replace_module_unet=DEFAULT_TARGET_REPLACE,
-    safe_form=True,
+    safe_form=False,
 ):
     if not safe_form:
         # save ti
         if save_ti:
-            ti_path = _ti_lora_path(save_path)
+            ti_path = save_path + 'TI.pt'
             learned_embeds_dict = {}
             for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
                 learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
@@ -311,16 +303,262 @@ def save_all(
         if save_lora:
 
             save_lora_weight(
-                unet, save_path, target_replace_module=target_replace_module_unet
+                unet, save_path+'unet_lora.pt', target_replace_module=target_replace_module_unet
             )
             print("Unet saved to ", save_path)
 
             save_lora_weight(
                 text_encoder,
-                _text_lora_path(save_path),
+                save_path+'encoder1_lora.pt',
                 target_replace_module=target_replace_module_text,
             )
-            print("Text Encoder saved to ", _text_lora_path(save_path))
+            print("Text Encoder1 saved to ", save_path+'encoder1_lora.pt')
+
+            save_lora_weight(
+                text_encoder2,
+                save_path+'encoder2_lora.pt',
+                target_replace_module=target_replace_module_text,
+            )
+            print("Text Encoder2 saved to ", save_path+'encoder2_lora.pt')
 
     else:
         raise NotImplementedError
+    
+def monkeypatch_or_replace_lora(
+    model,
+    loras,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+    r: Union[int, List[int]] = 4,
+):
+    for _module, name, _child_module in _find_modules(
+        model, target_replace_module, search_class=[nn.Linear, LoraInjectedLinear]
+    ):
+        _source = (
+            _child_module.linear
+            if isinstance(_child_module, LoraInjectedLinear)
+            else _child_module
+        )
+
+        weight = _source.weight
+        bias = _source.bias
+        _tmp = LoraInjectedLinear(
+            _source.in_features,
+            _source.out_features,
+            _source.bias is not None,
+            r=r.pop(0) if isinstance(r, list) else r,
+        )
+        _tmp.linear.weight = weight
+
+        if bias is not None:
+            _tmp.linear.bias = bias
+
+        # switch the module
+        _module._modules[name] = _tmp
+
+        up_weight = loras.pop(0)
+        down_weight = loras.pop(0)
+
+        _module._modules[name].lora_up.weight = nn.Parameter(
+            up_weight.type(weight.dtype)
+        )
+        _module._modules[name].lora_down.weight = nn.Parameter(
+            down_weight.type(weight.dtype)
+        )
+
+        _module._modules[name].to(weight.device)
+
+
+def monkeypatch_or_replace_lora_extended(
+    model,
+    loras,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+    r: Union[int, List[int]] = 4,
+):
+    for _module, name, _child_module in _find_modules(
+        model,
+        target_replace_module,
+        search_class=[nn.Linear, LoraInjectedLinear, nn.Conv2d, LoraInjectedConv2d],
+    ):
+
+        if (_child_module.__class__ == nn.Linear) or (
+            _child_module.__class__ == LoraInjectedLinear
+        ):
+            if len(loras[0].shape) != 2:
+                continue
+
+            _source = (
+                _child_module.linear
+                if isinstance(_child_module, LoraInjectedLinear)
+                else _child_module
+            )
+
+            weight = _source.weight
+            bias = _source.bias
+            _tmp = LoraInjectedLinear(
+                _source.in_features,
+                _source.out_features,
+                _source.bias is not None,
+                r=r.pop(0) if isinstance(r, list) else r,
+            )
+            _tmp.linear.weight = weight
+
+            if bias is not None:
+                _tmp.linear.bias = bias
+
+        elif (_child_module.__class__ == nn.Conv2d) or (
+            _child_module.__class__ == LoraInjectedConv2d
+        ):
+            if len(loras[0].shape) != 4:
+                continue
+            _source = (
+                _child_module.conv
+                if isinstance(_child_module, LoraInjectedConv2d)
+                else _child_module
+            )
+
+            weight = _source.weight
+            bias = _source.bias
+            _tmp = LoraInjectedConv2d(
+                _source.in_channels,
+                _source.out_channels,
+                _source.kernel_size,
+                _source.stride,
+                _source.padding,
+                _source.dilation,
+                _source.groups,
+                _source.bias is not None,
+                r=r.pop(0) if isinstance(r, list) else r,
+            )
+
+            _tmp.conv.weight = weight
+
+            if bias is not None:
+                _tmp.conv.bias = bias
+
+        # switch the module
+        _module._modules[name] = _tmp
+
+        up_weight = loras.pop(0)
+        down_weight = loras.pop(0)
+
+        _module._modules[name].lora_up.weight = nn.Parameter(
+            up_weight.type(weight.dtype)
+        )
+        _module._modules[name].lora_down.weight = nn.Parameter(
+            down_weight.type(weight.dtype)
+        )
+
+        _module._modules[name].to(weight.device)
+
+
+def apply_learned_embed_in_clip(
+    learned_embeds,
+    text_encoder,
+    tokenizer,
+    token: Optional[Union[str, List[str]]] = None,
+    idempotent=False,
+):
+    if isinstance(token, str):
+        trained_tokens = [token]
+    elif isinstance(token, list):
+        assert len(learned_embeds.keys()) == len(
+            token
+        ), "The number of tokens and the number of embeds should be the same"
+        trained_tokens = token
+    else:
+        trained_tokens = list(learned_embeds.keys())
+
+    for token in trained_tokens:
+        print(token)
+        embeds = learned_embeds[token]
+
+        # cast to dtype of text_encoder
+        dtype = text_encoder.get_input_embeddings().weight.dtype
+        num_added_tokens = tokenizer.add_tokens(token)
+
+        i = 1
+        if not idempotent:
+            while num_added_tokens == 0:
+                print(f"The tokenizer already contains the token {token}.")
+                token = f"{token[:-1]}-{i}>"
+                print(f"Attempting to add the token {token}.")
+                num_added_tokens = tokenizer.add_tokens(token)
+                i += 1
+        elif num_added_tokens == 0 and idempotent:
+            print(f"The tokenizer already contains the token {token}.")
+            print(f"Replacing {token} embedding.")
+
+        # resize the token embeddings
+        text_encoder.resize_token_embeddings(len(tokenizer))
+
+        # get the id for the token and assign the embeds
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        text_encoder.get_input_embeddings().weight.data[token_id] = embeds
+    return token
+
+
+def load_learned_embed_in_clip(
+    learned_embeds_path,
+    text_encoder,
+    tokenizer,
+    token: Optional[Union[str, List[str]]] = None,
+    idempotent=False,
+):
+    learned_embeds = torch.load(learned_embeds_path)
+    apply_learned_embed_in_clip(
+        learned_embeds, text_encoder, tokenizer, token, idempotent
+    )
+
+def patch_pipe(
+    pipe,
+    root_path,
+    token: Optional[str] = None,
+    r: int = 4,
+    patch_unet=True,
+    patch_text=True,
+    patch_ti=True,
+    idempotent_token=True,
+    unet_target_replace_module={"CrossAttention", "Attention", "GEGLU"},
+    text_target_replace_module={"CLIPAttention"}
+):
+    # torch format
+
+    unet_path = os.path.join(root_path,'unet_lora.pt')
+    ti_path = os.path.join(root_path,'TI.pt')
+    text1_path = os.path.join(root_path,'encoder1_lora.pt')
+    text2_path = os.path.join(root_path,'encoder2_lora.pt')
+
+    if patch_unet:
+        print("LoRA : Patching Unet")
+        monkeypatch_or_replace_lora(
+            pipe.unet,
+            torch.load(unet_path),
+            r=r,
+            target_replace_module=unet_target_replace_module,
+        )
+
+    if patch_text:
+        print("LoRA : Patching text encoder1")
+        monkeypatch_or_replace_lora(
+            pipe.text_encoder,
+            torch.load(text1_path),
+            target_replace_module=text_target_replace_module,
+            r=r,
+        )
+
+        print("LoRA : Patching text encoder2")
+        monkeypatch_or_replace_lora(
+            pipe.text_encoder_2,
+            torch.load(text2_path),
+            target_replace_module=text_target_replace_module,
+            r=r,
+        )
+    if patch_ti:
+        print("LoRA : Patching token input")
+        token = load_learned_embed_in_clip(
+            ti_path,
+            pipe.text_encoder,
+            pipe.tokenizer,
+            token=token,
+            idempotent=idempotent_token,
+        )

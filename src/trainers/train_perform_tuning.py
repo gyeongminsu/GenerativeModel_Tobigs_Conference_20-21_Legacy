@@ -30,7 +30,6 @@ class PerformTuningTrainer():
         self.device = device
         self.cfg = cfg
         self.placeholder_ids = placeholder_ids
-        self.vae = sd_model[0].to(self.device)
         
         self.vae = sd_model.vae.to(self.device)
         self.unet = sd_model.unet.to(self.device)
@@ -38,14 +37,12 @@ class PerformTuningTrainer():
 
         self.train_loader = train_loader
         
-        if len(sd_model[3]) == 2:
-            self.tokenizer1 = sd_model.tokenizer
-            self.tokenizer2 = sd_model.tokenizer_2
-            self.text_encoder1 = sd_model.text_encoder.to(self.device)
-            self.text_encoder2 = sd_model.text_encoder_2.to(self.device)
-        else:
-            self.tokenizer1 = sd_model.tokenizer
-            self.text_encoder1 = sd_model.text_encoder.to(self.device)
+        
+        self.tokenizer1 = sd_model.tokenizer
+        self.tokenizer2 = sd_model.tokenizer_2
+        self.text_encoder1 = sd_model.text_encoder.to(self.device)
+        self.text_encoder2 = sd_model.text_encoder_2.to(self.device)
+        
         self.logger = logger
         
         self.inject_lora(cfg.lora)
@@ -216,11 +213,11 @@ class PerformTuningTrainer():
                     raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                train_logs['pt_loss'] = loss.item()
+                train_logs['pt/loss'] = loss.item()
                 scheduler_lr = self.scheduler.get_lr()
-                train_logs['ti_lr_unet'] = scheduler_lr[0]
-                train_logs['ti_lr_text_encoder1'] = scheduler_lr[1]
-                train_logs['ti_lr_text_encoder2'] = scheduler_lr[2]
+                train_logs['pt/lr_unet'] = scheduler_lr[0]
+                train_logs['pt/lr_text_encoder1'] = scheduler_lr[1]
+                train_logs['pt/lr_text_encoder2'] = scheduler_lr[2]
                 self.logger.update_log(**train_logs)
                 
                 if self.step % cfg.log_every == 0:
@@ -234,6 +231,11 @@ class PerformTuningTrainer():
                 self.step += 1
             self.epoch += 1
 
+        save_path = f'/home2/kkms4641/GenerativeModel_Tobigs_Conference_20-21/model_dumps/model/{cfg.save_path}/'
+
+        placeholder_tokens = self.tokenizer1.convert_ids_to_tokens(self.placeholder_ids)
+        save_all(self.unet,self.text_encoder1,self.text_encoder2,save_path=save_path,placeholder_token_ids=self.placeholder_ids,placeholder_tokens=placeholder_tokens,
+                 target_replace_module_text={"CLIPAttention"},target_replace_module_unet={"CrossAttention", "Attention", "GEGLU"})
         # after training, make PipeLine
         pipeline = DiffusionPipeline.from_pretrained(
                 "stabilityai/stable-diffusion-xl-base-1.0",

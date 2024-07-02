@@ -1,5 +1,5 @@
 project_name : 'Tobigs_Conference'
-entity: 'rladyd020'
+entity: 'kkms4641'
 group_name: 'train'
 exp_name: 'train1'
 device: 'cuda:0'
